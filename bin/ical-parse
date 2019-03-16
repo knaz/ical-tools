@@ -6,9 +6,12 @@ use warnings;
 use IO::Uncompress::Unzip qw(unzip $UnzipError) ;
 
 my $zipped_filename = shift || do {
-  opendir my $d, "$ENV{HOME}/Downloads";
+  my $p = "$ENV{HOME}/Downloads";
+  opendir(my $d, $p);
+  my @files = grep !/^\./, readdir $d;
+  @files = sort {(stat "$p/$b")[10] <=> (stat "$p/$a")[10]} @files;
   my $file;
-  while ($file = readdir $d) {
+  while ($file = shift @files) {
     last if $file =~ /\.ical(?:\s+\(\d+\))?\.zip\z/;
   }
   warn "file=$file\n";
@@ -27,6 +30,7 @@ my @calendars;
 
 my $event;
 my @events;
+my %events; # UID => [ event event event ]
 
 my $alarm;
 
@@ -39,7 +43,11 @@ sub end_calendar {
 }
 
 sub begin_event { $event = {} }
-sub end_event { push @events, $event; undef $event }
+sub end_event {
+  push @{$events{$event->{uid}} //= []}, $event;
+  push @events, $event;
+  undef $event;
+}
 
 sub begin_alarm { $alarm = 1 }
 sub end_alarm { $alarm = 0 }
@@ -62,6 +70,7 @@ while (my $line = <$f>) {
         $event->{start_time} = parse_time($line) if $line =~ /^DTSTART\b/;
         $event->{end_time}   = parse_time($line) if $line =~ /^DTEND\b/;
         $event->{summary}    = $1 if $line =~ /^SUMMARY:(.*)/;
+        $event->{uid}        = $1 if $line =~ /^UID:(.*)/;
       }
     }
     else {
@@ -100,7 +109,17 @@ for my $event (@{$time_track_calendar->{events}}) {
   $start = instantiate_date($start, $time_track_calendar) if $start;
   $end   = instantiate_date($end  , $time_track_calendar) if $end  ;
 
+  if ($start && !$end && $event->{uid}) {
+    my $leader = $events{$event->{uid}}[0];
+    $end = $start->clone->add_duration(
+      $leader->{end_time}->subtract_datetime($leader->{start_time})
+    ) if $leader->{end_time};
+  }
+
   next unless $start && $end;
+
+  $event->{start_time} = $start;
+  $event->{end_time}   = $end;
 
   $_->set_time_zone( $ENV{TZ} || 'America/New_York' ) for ($start, $end);
 
