@@ -1,0 +1,142 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use IO::Uncompress::Unzip qw(unzip $UnzipError) ;
+
+my $zipped_filename = shift || do {
+  opendir my $d, "$ENV{HOME}/Downloads";
+  my $file;
+  while ($file = readdir $d) {
+    last if $file =~ /\.ical(?:\s+\(\d+\))?\.zip\z/;
+  }
+  warn "file=$file\n";
+  "$ENV{HOME}/Downloads/$file";
+};
+
+(my $unzipped_filename = $zipped_filename) =~ s/\.zip\z//;
+
+my $status = unzip $zipped_filename => $unzipped_filename
+    or die "Failed to unzip $zipped_filename: $UnzipError\n";
+
+open my $f, "<", $unzipped_filename;
+
+my $calendar;
+my @calendars;
+
+my $event;
+my @events;
+
+my $alarm;
+
+sub begin_calendar { $calendar = {} }
+sub end_calendar {
+  $calendar->{events} = [@events];
+  @events = ();
+  push @calendars, $calendar;
+  undef $calendar;
+}
+
+sub begin_event { $event = {} }
+sub end_event { push @events, $event; undef $event }
+
+sub begin_alarm { $alarm = 1 }
+sub end_alarm { $alarm = 0 }
+
+while (my $line = <$f>) {
+  $line =~ s/\s+\z//;
+
+  begin_calendar(), next if $line =~ "BEGIN:VCALENDAR";
+  end_calendar(),   next if $line =~ "END:VCALENDAR";
+
+  if ($calendar) {
+    begin_event(), next if $line =~ "BEGIN:VEVENT";
+    end_event(),   next if $line =~ "END:VEVENT";
+
+    if ($event) {
+      begin_alarm(), next if $line =~ "BEGIN:VALARM";
+      end_alarm(),   next if $line =~ "END:VALARM";
+
+      if (!$alarm) {
+        $event->{start_time} = parse_time($line) if $line =~ /^DTSTART\b/;
+        $event->{end_time}   = parse_time($line) if $line =~ /^DTEND\b/;
+        $event->{summary}    = $1 if $line =~ /^SUMMARY:(.*)/;
+      }
+    }
+    else {
+      $calendar->{name} = $1 if $line =~ /^X-WR-CALNAME:(.*)/;
+      $calendar->{tz}   = $1 if $line =~ /^X-WR-TIMEZONE:(.*)/;
+    }
+  }
+}
+
+sub parse_time {
+  my ($line) = @_;
+
+  my $word = $1
+    if $line =~ s/^(\w+)//;
+
+  my %modifiers;
+
+  if ($line =~ s/^;(.*?)://) {
+    %modifiers = map { /(.*)=(.*)/ ? ($1 => $2) : () } split /,/, $1;
+  }
+  else {
+    $line =~ s/^://;
+  }
+
+  return { t => $line, mods => \%modifiers };
+}
+
+my ($time_track_calendar) = grep $_->{name} =~ /time track/i, @calendars;
+
+use DateTime;
+
+for my $event (@{$time_track_calendar->{events}}) {
+  my $start = $event->{start_time};
+  my $end   = $event->{end_time};
+
+  $start = instantiate_date($start, $time_track_calendar) if $start;
+  $end   = instantiate_date($end  , $time_track_calendar) if $end  ;
+
+  next unless $start && $end;
+
+  $_->set_time_zone( $ENV{TZ} || 'America/New_York' ) for ($start, $end);
+
+  $event->{summary} =~ s/"/""/g;
+  $event->{summary} = qq{"$event->{summary}"};
+
+  print $start->ymd('').",".$event->{summary}.",".$start->hms(':').",".$end->hms(':')."\n";
+}
+
+sub instantiate_date {
+  my ($date, $calendar) = @_;
+
+  my $mods = $date->{mods} // {};
+  my $tz   = $mods->{TZID} // $calendar->{tz};
+
+  if ($mods->{VALUE} && $mods->{VALUE} eq 'DATE') {
+    return DateTime->new(
+        year       => $1,
+        month      => $2,
+        day        => $3,
+        time_zone  => $tz,
+    ) if $date->{t} =~ /^(\d{4})(\d{2})(\d{2})/;
+
+    die "Cannot parse date $date->{t}";
+  }
+
+  return DateTime->new(
+      year       => $1,
+      month      => $2,
+      day        => $3,
+      hour       => $4,
+      minute     => $5,
+      second     => $6,
+      nanosecond => 0,
+      time_zone  => $tz,
+  ) if $date->{t} =~ /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/;
+
+  die "Cannot parse time $date->{t}";
+}
