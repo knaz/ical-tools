@@ -1,0 +1,3 @@
+#!{perlbin}
+
+system('{perlcarton} install') == 0 or die "{perlcarton} install failed: $?";
