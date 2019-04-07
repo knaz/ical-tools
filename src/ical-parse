@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use IO::Uncompress::Unzip qw(unzip $UnzipError) ;
+use iCal::Parser;
 
 my $zipped_filename = shift || do {
   my $p = "$ENV{HOME}/Downloads";

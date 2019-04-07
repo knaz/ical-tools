@@ -1,3 +1,4 @@
 output
 diff
-bin/*
+bin
+local
