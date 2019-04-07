@@ -14,7 +14,10 @@ chomp $perl;
 #
 
 (my $carton = $perl) =~ s{/[^/]+\z}{/carton};
-warn "No $carton\n" unless (-x $carton);
+$carton = '' unless -x $carton;
+warn "No carton\n" unless $carton;
+
+$perl = "$carton exec $perl" if $carton;
 
 `mkdir -p bin`;
 
