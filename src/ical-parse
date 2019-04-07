@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!{perlbin}
 
 use strict;
 use warnings;
@@ -13,15 +13,19 @@ my $zipped_filename = shift || do {
   my $file;
   while ($file = shift @files) {
     last if $file =~ /\.ical(?:\s+\(\d+\))?\.zip\z/;
+    last if $file =~ /\.ics\z/;
   }
   warn "file=$file\n";
   "$ENV{HOME}/Downloads/$file";
 };
 
 (my $unzipped_filename = $zipped_filename) =~ s/\.zip\z//;
+warn "unzipped filename: $unzipped_filename\n";
 
-my $status = unzip $zipped_filename => $unzipped_filename
-    or die "Failed to unzip $zipped_filename: $UnzipError\n";
+if ($zipped_filename ne $unzipped_filename) {
+	my $status = unzip $zipped_filename => $unzipped_filename
+	    or die "Failed to unzip $zipped_filename: $UnzipError\n";
+}
 
 open my $f, "<", $unzipped_filename;
 
